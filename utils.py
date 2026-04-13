@@ -4,6 +4,7 @@ import numpy as np
 import random
 import matplotlib.pyplot as plt
 from itertools import product
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import torch
 
@@ -62,8 +63,8 @@ def get_param_id(params):
     return "_".join([str(params[k]) for k in sorted(params.keys())])
 
 def grid_search(target_dir, optimizer, fixed_params, search_space, train,
-                epochs = 100, batch_size = 16, test_size = 0.1, num_workers = 1,
-                num_seed = 5, verbose = False):
+                epochs, batch_size, test_size, num_seed,
+                num_workers = 1, max_parallel = None, verbose = False):
     """
         target_dir; 保存先のディレクトリ
         optimizer; torch.optim.Optimizer
@@ -92,7 +93,6 @@ def grid_search(target_dir, optimizer, fixed_params, search_space, train,
             if os.path.exists(target_path):
                 continue
 
-            print(target_path)
             train(target_path = target_path,
                   optimizer = optimizer,
                   optimizer_params = optimizer_params,
@@ -107,7 +107,54 @@ def grid_search(target_dir, optimizer, fixed_params, search_space, train,
         with open(f"{target_dir}/{param_id}_config.json", "w") as f:
             json.dump(optimizer_params, f, indent = 4)
 
-def get_best_results(target_dir, search_space, target_metric = "test_acc", mode = "max", num_seed = 5):
+# グリッドサーチをマルチプロセスで実行する関数
+# デバック時はコメントアウト
+def grid_search(target_dir, optimizer, fixed_params, search_space, train,
+                epochs, batch_size, test_size, num_seed, 
+                num_workers = 1, verbose = False, max_parallel = 2):
+    
+    os.makedirs(target_dir, exist_ok = True)
+    
+    tasks = []
+    for PARAMS in product(*search_space.values()):
+        params = {K: P for K, P in zip(search_space.keys(), PARAMS)}
+        param_id = get_param_id(params)
+        
+        optimizer_params = {**params, **fixed_params}
+        with open(f"{target_dir}/{param_id}_config.json", "w") as f:
+            json.dump(optimizer_params, f, indent=4)
+
+        for seed in range(num_seed):
+            target_path = f"{target_dir}/{param_id}_{seed}.json"
+            
+            if os.path.exists(target_path):
+                continue
+            
+            # trainの引数
+            task_args = {
+                "target_path": target_path,
+                "optimizer": optimizer,
+                "optimizer_params": optimizer_params,
+                "seed": seed,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "test_size": test_size,
+                "num_workers": num_workers,
+                "verbose": verbose
+            }
+            tasks.append(task_args)
+
+    with ProcessPoolExecutor(max_workers = max_parallel) as executor:
+        futures = [executor.submit(train, **t) for t in tasks]
+        
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Task failed with error: {e}")
+
+def get_best_results(target_dir, search_space, num_seed,
+                     target_metric = "test_acc", mode = "max"):
 
     best_results = dict()
     for PARAMS in product(*search_space.values()):
@@ -136,12 +183,15 @@ def get_best_results(target_dir, search_space, target_metric = "test_acc", mode 
 
     return best_results
 
-def plot_best_training_results(target_dir, best_results, search_space, metrics, ):
+def plot_best_training_results(target_dir, best_results, search_space, metrics):
 
     fig = plt.figure(figsize = (10, 10))
     for i, M in enumerate(metrics):
-        N = int(np.sqrt(len(metrics)))
-        ax = fig.add_subplot(N, N, i + 1)
+        num_metrics = len(metrics)
+        cols = 2
+        rows = (num_metrics + cols - 1) // cols
+        ax = fig.add_subplot(rows, cols, i + 1)
+
         for K, V in best_results.items():
             ax.plot(V[M], label = f"{K}")
         ax.set_xlabel("epoch")
@@ -165,7 +215,7 @@ def plot_best_training_results(target_dir, best_results, search_space, metrics, 
     fig.savefig(f"{target_dir}/best.png", bbox_inches = "tight")
     plt.show()
 
-def get_confidence_intervals(target_dir, search_space, metrics, num_seed = 5):
+def get_confidence_intervals(target_dir, search_space, metrics, num_seed):
     confidence_intervals = dict()
 
     for PARAMS in product(*search_space.values()):
@@ -199,8 +249,10 @@ def plot_confidence_intervals(target_dir, confidence_intervals, metrics, ):
     for K, V in confidence_intervals.items():
         fig = plt.figure(figsize = (10, 10))
         for i, M in enumerate(metrics):
-            N = int(np.sqrt(len(metrics)))
-            ax = fig.add_subplot(N, N, i + 1)
+            num_metrics = len(metrics)
+            cols = 2
+            rows = (num_metrics + cols - 1) // cols
+            ax = fig.add_subplot(rows, cols, i + 1)
 
             ax.plot(V[M]["mean"], label = f"{V[M]['mean'][-1]:.4f} ± {V[M]['std'][-1]:.4f}")
             ax.fill_between(
@@ -221,8 +273,8 @@ def plot_confidence_intervals(target_dir, confidence_intervals, metrics, ):
         plt.show()
 
 def run(target_dir, optimizer, fixed_params, search_space, train,
-        epochs = 100, batch_size = 16, test_size = 0.1, num_workers = 1,
-        num_seed = 5, verbose = False,
+        epochs, batch_size, test_size, num_workers,
+        num_seed = 5, max_parallel = 1, verbose = False,
         metrics = ["train_loss", "train_acc", "test_loss", "test_acc"], target_metric = "test_acc", mode = "max"):
     """
         target_dir; 保存先のディレクトリ
@@ -237,6 +289,12 @@ def run(target_dir, optimizer, fixed_params, search_space, train,
                 fixed_params = fixed_params,
                 search_space = search_space,
                 train = train,
+                epochs = epochs,
+                batch_size = batch_size,
+                test_size = test_size,
+                num_workers = num_workers,
+                num_seed = num_seed,
+                max_parallel = max_parallel,
                 verbose = verbose)
 
     best_results = get_best_results(target_dir = target_dir,
@@ -276,8 +334,10 @@ def run(target_dir, optimizer, fixed_params, search_space, train,
         json.dump(training_results, f, indent=4)
 
 def run_all(root_dir, optimizer_to_params, train,
-            epochs, batch_size, test_size, num_workers, num_seed, verbose,
-            metrics = ["train_loss", "train_acc", "test_loss", "test_acc"], target_metric = "test_acc", mode = "max"):
+            epochs, batch_size, test_size, num_seed, 
+            num_workers = 1, max_parallel = None, verbose = False,
+            metrics = ["train_loss", "train_acc", "test_loss", "test_acc"], 
+            target_metric = "test_acc", mode = "max"):
     """
         target_dir; 保存先のディレクトリ
         optimizer; torch.optim.Optimizer
@@ -302,8 +362,9 @@ def run_all(root_dir, optimizer_to_params, train,
             epochs = epochs,
             batch_size = batch_size,
             test_size = test_size,
-            num_workers = num_workers,
             num_seed = num_seed,
+            num_workers = num_workers,
+            max_parallel = max_parallel,
             verbose = verbose,
             metrics = metrics,
             target_metric = target_metric,
@@ -334,7 +395,10 @@ def run_all(root_dir, optimizer_to_params, train,
 
     fig = plt.figure(figsize = (10, 10))
     for i, M in enumerate(metrics):
-        ax = fig.add_subplot(int(np.sqrt(len(metrics))), int(np.sqrt(len(metrics))), i + 1)
+        num_metrics = len(metrics)
+        cols = 2
+        rows = (num_metrics + cols - 1) // cols
+        ax = fig.add_subplot(rows, cols, i + 1)
 
         for K, V in optimizer_to_best_results.items():
 
@@ -354,3 +418,13 @@ def run_all(root_dir, optimizer_to_params, train,
 
     fig.savefig(f"{root_dir}/best_confidence_intervals.png", bbox_inches = "tight")
     plt.show()
+
+    with open(f"{root_dir}/config.json", "w") as f:
+        json.dump({
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "test_size": test_size,
+            "num_seed": num_seed,
+            "num_workers": num_workers,
+            "max_parallel": max_parallel,
+        }, f, indent = 4)

@@ -91,6 +91,8 @@ def load_model(seed = 0):
 def train(target_path, optimizer, optimizer_params,
           epochs = 100, batch_size = 16, test_size = 0.1, num_workers = 1,
           seed = 0, verbose = False):
+    
+    print(target_path)
 
     initial_metrics_sum = {"loss": 0, "acc": 0}
     metrics = [f"train_{M}" for M in initial_metrics_sum.keys()] + \
@@ -177,3 +179,6 @@ def train(target_path, optimizer, optimizer_params,
         logger(*train_metric_avg.values(), *test_metric_avg.values())
 
     logger.save(target_path)
+
+    del model, optimizer, train_loader, test_loader
+    torch.cuda.empty_cache()
