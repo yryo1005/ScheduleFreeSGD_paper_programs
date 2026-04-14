@@ -1,72 +1,32 @@
 import copy
 from tqdm import tqdm
 
-import sklearn.datasets as sk_datasets
-from sklearn.model_selection import train_test_split
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
+from torchvision import datasets, transforms
 
 import sys
 sys.path.append("../")
 from utils import *
 
-def load_data(batch_size = 16, test_size = 0.1, num_workers = 1, seed = 0):
+def load_data(batch_size = 16, test_size = None, num_workers = 1, seed = 0):
 
-    class IrisDataset(Dataset):
-        def __init__(self, inputs, teacher_signals):
-            if len(inputs) != len(teacher_signals):
-                raise
-
-            self.inputs = inputs
-            self.teacher_signals = teacher_signals
-
-        def __len__(self):
-            return len(self.inputs)
-
-        def __getitem__(self, idx):
-            input = torch.tensor( self.inputs[idx], dtype = torch.float32 )
-            teacher_signal = torch.tensor(self.teacher_signals[idx], dtype = torch.int64)
-
-            return input, teacher_signal
-
-    def collate_fn(batch):
-        inputs = torch.stack( [B[0] for B in batch] )
-        teacher_signals = torch.stack( [B[1] for B in batch] )
-
-        return inputs, teacher_signals
-
-    iris = sk_datasets.load_iris()
-    inputs = iris.data
-    teacher_signals = iris.target
-
-    tmp = list(zip(inputs, teacher_signals))
-    train_tmp, test_tmp = train_test_split(tmp, test_size = test_size, random_state = seed)
+    train_dataset = datasets.MNIST(root = "/home/user/workspace/ScheduleFreeSGD_paper/data", train = True, 
+                                   transform = transforms.Compose([transforms.ToTensor()]), download = True)
+    test_dataset = datasets.MNIST(root = "/home/user/workspace/ScheduleFreeSGD_paper/data", train = False, 
+                                  transform = transforms.Compose([transforms.ToTensor()]), download = True)
 
     generator = torch.Generator()
     generator.manual_seed(seed)
-
-    train_inputs, train_teacher_signals = zip(*train_tmp)
-    train_dataset = IrisDataset(train_inputs, train_teacher_signals)
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size = batch_size,
-        collate_fn = collate_fn,
-        num_workers = num_workers,
-        shuffle = True,
-        generator = generator
-    )
-
-    test_inputs, test_teacher_signals = zip(*test_tmp)
-    test_dataset = IrisDataset(test_inputs, test_teacher_signals)
-    test_dataloader = DataLoader(
-        test_dataset,
-        batch_size = batch_size,
-        collate_fn = collate_fn,
-        num_workers = num_workers,
-        shuffle = False,
-    )
+    train_dataloader = DataLoader(train_dataset, 
+                                  batch_size = batch_size, 
+                                  shuffle = True, 
+                                  generator = generator, 
+                                  num_workers = num_workers)
+    test_dataloader = DataLoader(test_dataset, 
+                                 batch_size = batch_size, 
+                                 num_workers = num_workers)
 
     return train_dataloader, test_dataloader
 
@@ -76,10 +36,14 @@ def load_model(seed = 0):
         def __init__(self):
             super().__init__()
 
-            self.fc1 = nn.Linear(4, 3)
+            self.fc1 = nn.Linear(784, 128)
+            self.fc2 = nn.Linear(128, 10)
 
         def forward(self, inputs):
+            inputs = inputs.view(-1, 784)
             Y = self.fc1(inputs)
+            Y = torch.relu(Y)
+            Y = self.fc2(Y)
 
             return Y
 

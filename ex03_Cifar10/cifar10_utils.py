@@ -1,90 +1,83 @@
 import copy
 from tqdm import tqdm
 
-import sklearn.datasets as sk_datasets
-from sklearn.model_selection import train_test_split
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
+from torchvision import datasets, transforms
 
 import sys
 sys.path.append("../")
 from utils import *
 
-def load_data(batch_size = 16, test_size = 0.1, num_workers = 1, seed = 0):
+def load_data(batch_size = 16, test_size = None, num_workers = 1, seed = 0):
 
-    class IrisDataset(Dataset):
-        def __init__(self, inputs, teacher_signals):
-            if len(inputs) != len(teacher_signals):
-                raise
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+    ])
 
-            self.inputs = inputs
-            self.teacher_signals = teacher_signals
-
-        def __len__(self):
-            return len(self.inputs)
-
-        def __getitem__(self, idx):
-            input = torch.tensor( self.inputs[idx], dtype = torch.float32 )
-            teacher_signal = torch.tensor(self.teacher_signals[idx], dtype = torch.int64)
-
-            return input, teacher_signal
-
-    def collate_fn(batch):
-        inputs = torch.stack( [B[0] for B in batch] )
-        teacher_signals = torch.stack( [B[1] for B in batch] )
-
-        return inputs, teacher_signals
-
-    iris = sk_datasets.load_iris()
-    inputs = iris.data
-    teacher_signals = iris.target
-
-    tmp = list(zip(inputs, teacher_signals))
-    train_tmp, test_tmp = train_test_split(tmp, test_size = test_size, random_state = seed)
+    train_dataset = datasets.CIFAR10(root = "/home/user/workspace/ScheduleFreeSGD_paper/data", train = True, 
+                                     transform = transform, download = True)
+    test_dataset = datasets.CIFAR10(root = "/home/user/workspace/ScheduleFreeSGD_paper/data", train = False, 
+                                    transform = transform, download = True)
 
     generator = torch.Generator()
     generator.manual_seed(seed)
-
-    train_inputs, train_teacher_signals = zip(*train_tmp)
-    train_dataset = IrisDataset(train_inputs, train_teacher_signals)
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size = batch_size,
-        collate_fn = collate_fn,
-        num_workers = num_workers,
-        shuffle = True,
-        generator = generator
-    )
-
-    test_inputs, test_teacher_signals = zip(*test_tmp)
-    test_dataset = IrisDataset(test_inputs, test_teacher_signals)
-    test_dataloader = DataLoader(
-        test_dataset,
-        batch_size = batch_size,
-        collate_fn = collate_fn,
-        num_workers = num_workers,
-        shuffle = False,
-    )
+    train_dataloader = DataLoader(train_dataset, 
+                                  batch_size = batch_size, 
+                                  shuffle = True, 
+                                  generator = generator, 
+                                  num_workers = num_workers)
+    test_dataloader = DataLoader(test_dataset, 
+                                 batch_size = batch_size, 
+                                 num_workers = num_workers)
 
     return train_dataloader, test_dataloader
 
 def load_model(seed = 0):
-
-    class MyModel(nn.Module):
-        def __init__(self):
+    # AlexNetをCIFAR-10用に改造
+    class AlexNet(nn.Module):
+        def __init__(self, num_classes=10):
             super().__init__()
+            self.features = nn.Sequential(
+                # 入力: 3 x 32 x 32
+                nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=2, stride=2), # 16 x 16
+                
+                nn.Conv2d(64, 192, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=2, stride=2), # 8 x 8
+                
+                nn.Conv2d(192, 384, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True),
+                
+                nn.Conv2d(384, 256, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True),
+                
+                nn.Conv2d(256, 256, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=2, stride=2), # 4 x 4
+            )
+            self.classifier = nn.Sequential(
+                nn.Dropout(),
+                nn.Linear(256 * 4 * 4, 4096),
+                nn.ReLU(inplace=True),
+                nn.Dropout(),
+                nn.Linear(4096, 4096),
+                nn.ReLU(inplace=True),
+                nn.Linear(4096, num_classes),
+            )
 
-            self.fc1 = nn.Linear(4, 3)
+        def forward(self, x):
+            x = self.features(x)
+            x = torch.flatten(x, 1)
+            x = self.classifier(x)
+            return x
 
-        def forward(self, inputs):
-            Y = self.fc1(inputs)
-
-            return Y
-
-    set_seed(seed = seed)
-    model = MyModel()
+    set_seed(seed = seed) 
+    model = AlexNet(num_classes=10)
 
     return model
 
