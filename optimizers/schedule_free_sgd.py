@@ -79,7 +79,7 @@ class ScheduleFreeSGD(optim.Optimizer):
                 tmp = 1 / (k + 1)
                 r.mul_(1 - tmp).add_(w, alpha = tmp)
                 # 内分パラメータを更新
-                s.copy_(r * gamma).add_(w, alpha = 1 - gamma)
+                s.copy_(w * gamma).add_(r, alpha = 1 - gamma)
 
                 p.copy_(s)
 

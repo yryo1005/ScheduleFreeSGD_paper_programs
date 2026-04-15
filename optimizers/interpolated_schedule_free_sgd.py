@@ -33,9 +33,8 @@ class InterpolatedScheduleFreeSGD(optim.Optimizer):
             if train_mode:
                 for p in group['params']:
                     state = self.state[p]
-                    if 'w' not in state:
-                        state['w'] = p.detach().clone() # 平均パラメータ
                     if 'r' in state:
+                        state['w'] = p.detach().clone()
                         p.copy_(state['r'])
                 group['train_mode'] = False
 
