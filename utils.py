@@ -192,8 +192,9 @@ def plot_best_training_results(target_dir, best_results, search_space, metrics):
         rows = (num_metrics + cols - 1) // cols
         ax = fig.add_subplot(rows, cols, i + 1)
 
+        colors = [plt.get_cmap('turbo')(i) for i in np.linspace(0, 1, len(best_results))]
         for K, V in best_results.items():
-            ax.plot(V[M], label = f"{K}")
+            ax.plot(V[M], label = f"{K}", color = colors.pop())
         ax.set_xlabel("epoch")
         ax.set_ylabel(M)
         ax.set_title(M)
@@ -247,6 +248,7 @@ def get_confidence_intervals(target_dir, search_space, metrics, num_seed):
 def plot_confidence_intervals(target_dir, confidence_intervals, metrics, ):
 
     for K, V in confidence_intervals.items():
+
         fig = plt.figure(figsize = (10, 10))
         for i, M in enumerate(metrics):
             num_metrics = len(metrics)
@@ -400,14 +402,17 @@ def run_all(root_dir, optimizer_to_params, train,
         rows = (num_metrics + cols - 1) // cols
         ax = fig.add_subplot(rows, cols, i + 1)
 
-        for K, V in optimizer_to_best_results.items():
+        colors = [plt.get_cmap('turbo')(i) for i in np.linspace(0, 1, len(optimizer_to_best_results))]
 
-            ax.plot(V[M]["mean"], label = f"{K} ± {V[M]['std'][-1]:.4f}")
+        for K, V in optimizer_to_best_results.items():
+            color = colors.pop()
+            ax.plot(V[M]["mean"], label = f"{K} ± {V[M]['std'][-1]:.4f}", color = color)
             ax.fill_between(
                 x = range(len(V[M]["mean"])),
                 y1 = np.array(V[M]["mean"]) - np.array(V[M]["std"]),
                 y2 = np.array(V[M]["mean"]) + np.array(V[M]["std"]),
                 alpha=0.2,
+                color = color
             )
 
         ax.set_xlabel("epoch")
